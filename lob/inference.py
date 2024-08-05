@@ -761,7 +761,7 @@ def generate(
         model: nn.Module,
         batchnorm: bool,
         encoder: Dict[str, Tuple[jax.Array, jax.Array]],
-        rng: jax.random.PRNGKeyArray,
+        rng: jax.Array,
         sample_top_n: int = 50,
         tick_size: int = 100,
         # if eval_msgs given, also returns loss of predictions
@@ -1222,7 +1222,7 @@ def generate_repeated_rollouts(
         model: nn.Module,
         batchnorm: bool,
         encoder: Dict[str, Tuple[jax.Array, jax.Array]],
-        rng: jax.random.PRNGKeyArray,
+        rng: jax.Array,
         n_vol_series: int,
         sim_book_levels: int,
         sim_queue_len: int,
@@ -1313,7 +1313,7 @@ def sample_messages(
         n_samples: int,  # draw n random samples from dataset for evaluation
         num_repeats: int,  # how often to repeat generation for each data sample
         ds: LOBSTER_Dataset,
-        rng: jax.random.PRNGKeyArray,
+        rng: jax.Array,
         seq_len: int,
         n_msgs: int,
         n_gen_msgs: int,
@@ -1402,7 +1402,7 @@ def generate_impact_rollout(
         model: nn.Module,
         batchnorm: bool,
         encoder: Dict[str, Tuple[jax.Array, jax.Array]],
-        rng: jax.random.PRNGKeyArray,
+        rng: jax.Array,
         n_vol_series: int,
         sim_book_levels: int,
         sim_queue_len: int,
@@ -1601,7 +1601,7 @@ def study_impact(
         rel_price: int,
         n_samples: int,  # draw n random samples from dataset for evaluation
         ds: LOBSTER_Dataset,
-        rng: jax.random.PRNGKeyArray,
+        rng: jax.Array,
         seq_len: int,
         n_msgs: int,
         n_gen_msgs: int,

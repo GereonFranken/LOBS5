@@ -462,7 +462,6 @@ def train_epoch(
         batch_losses.append(loss[0])
         lr_params = (decay_function, ssm_lr, lr, step, end_step, opt_config, lr_min)
         state, step = update_learning_rate_per_step(lr_params, state)
-
     # Return average loss over batches
     return state, np.mean(np.array(batch_losses)), step
 
@@ -474,7 +473,7 @@ def train_epoch(
     out_axes=(0, 0))
 def train_step(
         state: train_state.TrainState,
-        rng: jax.random.PRNGKeyArray,  # 3
+        rng: jax.Array,  # 3
         batch_inputs: Tuple[jax.Array, jax.Array], # 4
         batch_labels: jax.Array, # 5
         batch_integration_timesteps: Tuple[jax.Array, jax.Array], # 6

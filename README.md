@@ -19,7 +19,7 @@ The GPU installation of JAX can cause problems, further instructions are availab
 The data used is NASDAQ LOB data from [LOBSTER](https://lobsterdata.com/index.php).
 After downloading and unpacking the data files, they need to be pre-processed for model training. An example command for GOOG is as follows:
 
-`python lob/preproc.py --data_dir /path/to/LOBS5/data/GOOG/ --save_dir /path/to/LOBS5/data/GOOG/ --n_tick_range 500 --use_raw_book_repr`
+`python -m lob.preproc --data_dir /path/to/LOBS5/data/GOOG/ --save_dir /path/to/LOBS5/data/GOOG/ --n_tick_range 500 --use_raw_book_repr`
 
 ## Repository Structure
 

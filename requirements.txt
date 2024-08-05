@@ -28,3 +28,5 @@ torchvision
 tqdm==4.65.0
 traitlets==5.9.0
 wandb
+gnureadline; sys_platform != 'win32'
+pyreadline; sys_platform == 'win32'
