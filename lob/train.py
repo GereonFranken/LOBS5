@@ -1,9 +1,18 @@
+import asyncio
+from concurrent import futures
 from functools import partial
+import functools
+import os
+import pathlib
+from typing import List, Optional, Sequence
+from flax.training import train_state
+import flax
+import flax.training
 from jax import random
 import jax.numpy as np
+import orbax.checkpoint as ocp
 from jax.scipy.linalg import block_diag
 from flax.training import checkpoints
-import orbax.checkpoint
 from lob.lob_seq_model import BatchFullLobPredModel, BatchLobPredModel, BatchPaddedLobPredModel
 import wandb
 
@@ -16,6 +25,59 @@ from s5.ssm import init_S5SSM
 from s5.ssm_init import make_DPLR_HiPPO
 
 
+class TrainStateHandler(ocp.pytree_checkpoint_handler.TypeHandler):
+        """Serializes MyState to the numpy npz format."""
+
+
+        def __init__(self):
+            self._executor = futures.ThreadPoolExecutor(max_workers=1)
+            # self.ParamInfo = ocp.pytree_checkpoint_handler.ParamInfo
+            # self.MetaData = ocp.metadata.Metadata
+
+        def typestr(self) -> str:
+            return 'TrainState'
+
+        async def serialize(
+            self,
+            value: train_state.TrainState,
+            # infos: Sequence[ParamInfo],
+            args: Optional[Sequence[ocp.SaveArgs]],
+        ) -> List[futures.Future]:
+            # state_dict = flax.serialization.to_state_dict(value)
+            serialized_dict = {}
+            for key, val in value.items():
+                if isinstance(val, flax.core.frozen_dict.FrozenDict):
+                    serialized_dict[key] = flax.serialization.to_state_dict(val)
+                else:
+                    serialized_dict[key] = val
+            return serialized_dict
+            # return state_dict
+
+        async def deserialize(
+            self,
+            value: dict,
+            # infos: Sequence[ParamInfo],
+            args: Optional[Sequence[ocp.RestoreArgs]] = None,
+        ) -> train_state.TrainState:
+            # state_dict = value
+            deserialized_dict = {}
+            for key, val in value.items():
+                if isinstance(val, dict) and 'collection' in val:
+                    deserialized_dict[key] = flax.serialization.from_state_dict(flax.core.unfreeze(val), val)
+                else:
+                    deserialized_dict[key] = val
+            return deserialized_dict
+            # return flax.serialization.from_state_dict(flax.core.unfreeze(value), state_dict)
+
+        async def metadata(self):#, infos: Sequence[ParamInfo]) -> Sequence[Metadata]:
+            # This method is explained in a separate section.
+            return []
+            # return [Metadata(name=info.name, directory=info.path) for info in infos]
+ocp.type_handlers.register_type_handler(
+    train_state.TrainState, TrainStateHandler(), override=True
+)
+
+
 def train(args):
     """
     Main function to train over a certain number of epochs
@@ -25,6 +87,7 @@ def train(args):
     best_test_acc = -10000.0
 
     # for parameter sweep: get args from wandb server
+
     if args is None:
         args = wandb.config
     else:
@@ -139,7 +202,7 @@ def train(args):
         # different offsets
         trainloader = create_lobster_train_loader(
             lobster_dataset,
-            int(random.randint(skey, (1,), 0, 100000)),
+            int(random.randint(skey, (1,), 0, 100000)[0]),
             args.bsz,
             num_workers=args.n_data_workers,
             reset_train_offsets=True)
@@ -189,6 +252,7 @@ def train(args):
             )
 
         # save checkpoint
+        # TODO: Make serialization of model work
         ckpt = {
             'model': state,
             'config': vars(args),
@@ -200,15 +264,17 @@ def train(args):
                 'acc_test': test_acc,
             }
         }
-        orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+        
+        orbax_checkpointer = ocp.PyTreeCheckpointer()
+        project_path = pathlib.Path(os.path.abspath('')).parent.absolute().resolve()
         checkpoints.save_checkpoint(
-            ckpt_dir=f'checkpoints/{run.name}_{run.id}',
+            ckpt_dir=project_path.joinpath(f"checkpoints/{run.name}_{run.id}"),
             target=ckpt,
             step=epoch,
             overwrite=True,
             keep=2,
             keep_every_n_steps=10,
-            orbax_checkpointer=orbax_checkpointer
+            orbax_checkpointer=orbax_checkpointer,
         )
 
         # For early stopping purposes

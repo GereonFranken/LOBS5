@@ -19,7 +19,7 @@ def train(args):
 
     best_test_loss = 100000000
     best_test_acc = -10000.0
-
+    
     if args.USE_WANDB:
         # Make wandb config dictionary
         wandb.init(project=args.wandb_project, job_type='model_training', config=vars(args), entity=args.wandb_entity)

@@ -8,8 +8,14 @@ from flax.training import train_state
 from flax import jax_utils
 import optax
 from typing import Any, Dict, Optional, Tuple, Union
+import torch
 
 from lob.lob_seq_model import LobPredModel
+
+if torch.cuda.is_available():
+    BACKEND = "gpu"
+else:
+    BACKEND = "cpu"
 
 
 # LR schedulers
@@ -159,12 +165,12 @@ def create_train_state(model_cls,
                             "dropout": dropout_rng},
                            *dummy_input, *integration_timesteps,
                            )
+    
+    # params = variables["params"].unfreeze()
+    # Note: `unfreeze()` is for using Optax.
+    params = variables["params"]
     if batchnorm:
-        params = variables["params"].unfreeze()
         batch_stats = variables["batch_stats"]
-    else:
-        params = variables["params"].unfreeze()
-        # Note: `unfreeze()` is for using Optax.
 
     if opt_config in ["standard"]:
         """This option applies weight decay to C, but B is kept with the
@@ -403,7 +409,7 @@ def _prep_batch_par(
     # CAVE: squeeze very important for training!
     return full_inputs, np.squeeze(targets.astype(np.float32)), integration_timesteps
 
-@partial(jax.jit, static_argnums=(0,), backend='gpu')# backend='cpu')
+@partial(jax.jit, static_argnums=(0,), backend=BACKEND)# backend='cpu')
 def device_reshape(
         num_devices: int,
         inputs: jax.Array,
@@ -466,7 +472,7 @@ def train_epoch(
     return state, np.mean(np.array(batch_losses)), step
 
 @partial(
-    jax.pmap, backend='gpu',
+    jax.pmap, backend=BACKEND,
     axis_name="batch_devices",
     static_broadcasted_argnums=(5,),  # TODO: revert to 5 for batchnorm in pmap
     in_axes=(0, None, 0, 0, 0, None),
