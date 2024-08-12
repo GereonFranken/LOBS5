@@ -92,8 +92,9 @@ def train(args):
     print("Lambda.shape={}".format(Lambda.shape))
     print("V.shape={}".format(V.shape))
     print("Vinv.shape={}".format(Vinv.shape))
-    
+
     ssm_init_fn = init_S5SSM(H=args.d_model,
+                             L=seq_len,
                              P=ssm_size,
                              Lambda_re_init=Lambda.real,
                              Lambda_im_init=Lambda.imag,

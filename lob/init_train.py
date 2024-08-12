@@ -16,9 +16,9 @@ from lob.lob_seq_model import BatchFullLobPredModel, BatchLobPredModel, BatchPad
 
 #from lob.lob_seq_model import BatchLobPredModel
 from lob.train_helpers import create_train_state, eval_step, prep_batch, cross_entropy_loss, compute_accuracy
-from s5.ssm import init_S5SSM
-from s5.ssm_init import make_DPLR_HiPPO
-from s5.dataloading import make_data_loader
+from mamba.ssm import init_S5SSM
+from mamba.ssm_init import make_DPLR_HiPPO
+from mamba.dataloading import make_data_loader
 from lob.lobster_dataloader import LOBSTER_Dataset, LOBSTER
 
 import lob.validation_helpers as valh
@@ -97,16 +97,17 @@ def init_train_state(
     if args.conj_sym:
         block_size = block_size // 2
         ssm_size = ssm_size // 2
-
+        
     Lambda = Lambda[:block_size]
     V = V[:, :block_size]
     Vc = V.conj().T
 
     # If initializing state matrix A as block-diagonal, put HiPPO approximation
     # on each block
-    Lambda = (Lambda * np.ones((args.blocks, block_size))).ravel()
-    V = block_diag(*([V] * args.blocks))
-    Vinv = block_diag(*([Vc] * args.blocks))
+    Lambda = (Lambda * np.ones((args.blocks, seq_len, block_size))).ravel()
+    V = block_diag(*([V] * args.blocks * seq_len))
+    Vinv = block_diag(*([Vc] * args.blocks * seq_len))
+
 
     if print_shapes:
         print("Lambda.shape={}".format(Lambda.shape))
@@ -119,8 +120,10 @@ def init_train_state(
     retrieval = False
     speech = False
 
+
     ssm_init_fn = init_S5SSM(
         H=args.d_model,
+        L=seq_len,
         P=ssm_size,
         Lambda_re_init=Lambda.real,
         Lambda_im_init=Lambda.imag,
