@@ -94,19 +94,20 @@ def init_train_state(
     # Initialize state matrix A using approximation to HiPPO-LegS matrix
     Lambda, _, B, V, B_orig = make_DPLR_HiPPO(block_size)
 
+
     if args.conj_sym:
         block_size = block_size // 2
         ssm_size = ssm_size // 2
-        
+
     Lambda = Lambda[:block_size]
     V = V[:, :block_size]
     Vc = V.conj().T
 
     # If initializing state matrix A as block-diagonal, put HiPPO approximation
     # on each block
-    Lambda = (Lambda * np.ones((args.blocks, seq_len, block_size))).ravel()
-    V = block_diag(*([V] * args.blocks * seq_len))
-    Vinv = block_diag(*([Vc] * args.blocks * seq_len))
+    Lambda = (Lambda * np.ones((args.blocks, block_size))).ravel()
+    V = block_diag(*([V] * args.blocks))
+    Vinv = block_diag(*([Vc] * args.blocks))
 
 
     if print_shapes:

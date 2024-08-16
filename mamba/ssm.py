@@ -101,6 +101,9 @@ class S5SSM(nn.Module):
     discretization: str
     dt_min: float
     dt_max: float
+    d_inner: int = 64
+    kernel_size: int = 4
+    expand: int = 2
     conj_sym: bool = True
     clip_eigs: bool = False
     bidirectional: bool = False
@@ -142,22 +145,31 @@ class S5SSM(nn.Module):
         """Initializes parameters once and performs discretization each time
            the SSM is applied to a sequence
         """
-
         if self.conj_sym:
             # Need to account for case where we actually sample real B and C, and then multiply
             # by the half sized Vinv and possibly V
             local_P = 2*self.P
         else:
             local_P = self.P
+        
+        self.input_proj = nn.Dense(self.expand * self.d_inner)
+        
+        # Convolution layer
+        self.conv = nn.Conv(
+            features=self.d_inner,
+            kernel_size=(self.kernel_size,),
+            padding='SAME'
+        )
+
 
         # Initialize diagonal state to state matrix Lambda (eigenvalues)
-        breakpoint()
         self.Lambda_re = self.param("Lambda_re", lambda rng, shape: self.Lambda_re_init, (None,))
         self.Lambda_im = self.param("Lambda_im", lambda rng, shape: self.Lambda_im_init, (None,))
         if self.clip_eigs:
             self.Lambda = np.clip(self.Lambda_re, None, -1e-4) + 1j * self.Lambda_im
         else:
             self.Lambda = self.Lambda_re + 1j * self.Lambda_im
+        
 
         # Initialize input to state (B) matrix
         B_init = lecun_normal()
@@ -168,7 +180,8 @@ class S5SSM(nn.Module):
                                                           shape,
                                                           self.Vinv),
                             B_shape)
-        B_tilde = self.B[..., 0] + 1j * self.B[..., 1]
+        self.B = self.param("B", nn.initializers.uniform(), B_shape)
+        # B_tilde = self.B[..., 0] + 1j * self.B[..., 1]
 
         # Initialize state to output (C) matrix
         if self.C_init in ["trunc_standard_normal"]:
@@ -190,29 +203,31 @@ class S5SSM(nn.Module):
             #     self.C_tilde = C[..., 0] + 1j * C[..., 1]
 
             # else:
-            C = self.param("C", C_init, (self.H, self.L, self.P, 2))
-            self.C_tilde = C[..., 0] + 1j * C[..., 1]
+            self.C = self.param("C", C_init, (self.H, self.P, 2))
+            # self.C_tilde = C[..., 0] + 1j * C[..., 1]
 
         else:
-            if self.bidirectional:
-                self.C1 = self.param("C1",
-                                     lambda rng, shape: init_CV(C_init, rng, shape, self.V),
-                                     C_shape)
-                self.C2 = self.param("C2",
-                                     lambda rng, shape: init_CV(C_init, rng, shape, self.V),
-                                     C_shape)
+            # if self.bidirectional:
+            #     self.C1 = self.param("C1",
+            #                          lambda rng, shape: init_CV(C_init, rng, shape, self.V),
+            #                          C_shape)
+            #     self.C2 = self.param("C2",
+            #                          lambda rng, shape: init_CV(C_init, rng, shape, self.V),
+            #                          C_shape)
 
-                C1 = self.C1[..., 0] + 1j * self.C1[..., 1]
-                C2 = self.C2[..., 0] + 1j * self.C2[..., 1]
-                self.C_tilde = np.concatenate((C1, C2), axis=-1)
+            #     C1 = self.C1[..., 0] + 1j * self.C1[..., 1]
+            #     C2 = self.C2[..., 0] + 1j * self.C2[..., 1]
+            #     self.C_tilde = np.concatenate((C1, C2), axis=-1)
 
             # else:
             self.C = self.param("C",
                                 lambda rng, shape: init_CV(C_init, rng, shape, self.V),
                                 C_shape)
+            # self.C_tilde = self.C[..., 0] + 1j * self.C[..., 1]
 
-            self.C_tilde = self.C[..., 0] + 1j * self.C[..., 1]
-
+        self.B_proj = nn.Dense(local_P * local_P)
+        self.C_proj = nn.Dense(local_P)
+        self.Lambda_proj = nn.Dense(local_P)
         # Initialize feedthrough (D) matrix
         self.D = self.param("D", normal(stddev=1.0), (self.H,))
 
@@ -220,17 +235,9 @@ class S5SSM(nn.Module):
         self.log_step = self.param("log_step",
                                    init_log_steps,
                                    (self.P, self.dt_min, self.dt_max))
-        step = self.step_rescale * np.exp(self.log_step[:, 0])
+        self.step = self.step_rescale * np.exp(self.log_step[:, 0])
 
-        # Discretize
-        if self.discretization in ["zoh"]:
-            self.Lambda_bar, self.B_bar = discretize_zoh(self.Lambda, B_tilde, step)
-        elif self.discretization in ["bilinear"]:
-            self.Lambda_bar, self.B_bar = discretize_bilinear(self.Lambda, B_tilde, step)
-        else:
-            raise NotImplementedError("Discretization method {} not implemented".format(self.discretization))
-
-    def __call__(self, input_sequence):
+    def __call__(self, input_sequence: jax.typing.ArrayLike):
         """
         Compute the LxH output of the S5 SSM given an LxH input sequence
         using a parallel scan.
@@ -239,9 +246,47 @@ class S5SSM(nn.Module):
         Returns:
             output sequence (float32): (L, H)
         """
-        ys = apply_ssm(self.Lambda_bar,
-                       self.B_bar,
-                       self.C_tilde,
+        # TODO: set batch size outside of call func
+        B = 1  # batch  size to keep consistent with paper
+        input_sequence = input_sequence.reshape((1, *input_sequence.shape))
+
+        B, _, _ = input_sequence.shape
+        # Step 1: Input projection and reshaping
+        x_lin = self.input_proj(input_sequence)  # shape: (B, L, expand * d_inner)
+        x_lin = x_lin.reshape(B, self.L, self.expand, self.d_inner)
+        x_lin = x_lin.transpose(0, 2, 1, 3)  # shape: (B, expand, seq_len, d_inner)
+
+        # Step 2: Convolution and activation
+        conv_out = self.conv(x_lin)  # shape: (B, expand, seq_len, d_inner)
+        conv_out = nn.selu(conv_out)  # Apply activation function
+
+        # Step 3: Apply transformations to get B_tilde and C_tilde
+        B_tilde = self.B_proj(conv_out)
+        B_tilde = B_tilde.reshape(B, self.expand, self.L, self.d_state, self.d_state)
+        
+        C_tilde = self.C_proj(conv_out)
+        C_tilde = C_tilde.reshape(B, self.expand, self.L, self.d_state)
+        
+        Lambda_tilde = self.Lambda_proj(x_lin)
+        Lambda_tilde = Lambda_tilde.reshape(B, self.expand, self.L, self.d_state)
+        
+        # Step 4: Create B_bar, C_bar, and Lambda_bar
+        B_bar = self.B[:, None, None, :, :] * nn.sigmoid(B_tilde)
+        C_bar = self.C[:, None, None, :, :] * nn.sigmoid(C_tilde)
+        Lambda_bar = jax.nn.softplus(self.Lambda[:, None, None, :] + Lambda_tilde)
+
+        # Discretize
+        if self.discretization in ["zoh"]:
+            Lambda_bar, B_bar = discretize_zoh(self.Lambda, B_tilde, self.step)
+        elif self.discretization in ["bilinear"]:
+            Lambda_bar, B_bar = discretize_bilinear(self.Lambda, B_tilde, self.step)
+        else:
+            raise NotImplementedError("Discretization method {} not implemented".format(self.discretization))
+
+
+        ys = apply_ssm(Lambda_bar,
+                       B_bar,
+                       C_bar,
                        input_sequence,
                        self.conj_sym,
                        self.bidirectional)
