@@ -85,8 +85,9 @@ def init_train_state(
     # Set global learning rate lr (e.g. encoders, etc.) as function of ssm_lr
     lr = args.lr_factor * ssm_lr
 
+    expand_factor = 2
     # determine the size of initial blocks
-    block_size = int(ssm_size / args.blocks)
+    block_size = int(ssm_size / args.blocks) * expand_factor
 
     key = random.PRNGKey(args.jax_seed)
     init_rng, train_rng = random.split(key, num=2)
@@ -102,7 +103,6 @@ def init_train_state(
     Lambda = Lambda[:block_size]
     V = V[:, :block_size]
     Vc = V.conj().T
-
     # If initializing state matrix A as block-diagonal, put HiPPO approximation
     # on each block
     Lambda = (Lambda * np.ones((args.blocks, block_size))).ravel()
@@ -130,6 +130,7 @@ def init_train_state(
         Lambda_im_init=Lambda.imag,
         V=V,
         Vinv=Vinv,
+        expand_factor=expand_factor,
         C_init=args.C_init,
         discretization=args.discretization,
         dt_min=args.dt_min,
