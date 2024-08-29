@@ -6,6 +6,7 @@ from flax import linen as nn
 from jax.nn.initializers import lecun_normal, normal
 
 from .ssm_init import init_CV, init_VinvB, init_log_steps, trunc_standard_normal
+from scipy.signal import cont2discrete
 
 
 # Discretization functions
@@ -37,9 +38,10 @@ def discretize_zoh(Lambda, B_tilde, Delta):
         Returns:
             discretized Lambda_bar (complex64), B_bar (complex64)  (P,), (P,H)
     """
-    Identity = np.ones(Lambda.shape[0])
-    Lambda_bar = np.exp(Lambda * Delta)
-    B_bar = (1/Lambda * (Lambda_bar-Identity))[..., None] * B_tilde
+    Identity = np.ones((Lambda.shape[0], Lambda.shape[1]))
+    # Lambda_bar = np.exp(Lambda * Delta)
+    Lambda_bar = jax.vmap(lambda d: np.exp(Lambda * d))(Delta)
+    B_bar = (1/Lambda * (Lambda_bar-Identity)) * B_tilde
     return Lambda_bar, B_bar
 
 
@@ -153,16 +155,16 @@ class S5SSM(nn.Module):
 
         self.expanded_P = self.expand_factor * local_P
         # self.expanded_P = self.expand_factor * self.P
-        self.input_projB = nn.Dense(self.expanded_P)
-        self.input_projLambda = nn.Dense(self.expanded_P)
-        self.gated_proj = nn.Dense(self.expanded_P)
+        self.input_projB = nn.Dense(self.expanded_P * self.H)
+        self.input_projLambda = nn.Dense(self.expanded_P * self.H)
+        self.gated_proj = nn.Dense(self.expanded_P * self.H)
         
         # Convolution layer
         self.conv = nn.Conv(
-            features=self.H,
+            features=self.expanded_P * self.H,
             kernel_size=(self.kernel_size,),
             padding='SAME'
-        )
+        ) 
 
 
         # Initialize diagonal state to state matrix Lambda (eigenvalues)
@@ -172,6 +174,7 @@ class S5SSM(nn.Module):
             self.Lambda = np.clip(self.Lambda_re, None, -1e-4) + 1j * self.Lambda_im
         else:
             self.Lambda = self.Lambda_re + 1j * self.Lambda_im
+        # self.Lambda = jnp.tile(self.Lambda, self.L).reshape((self.L, self.expanded_P))
         
 
         # Initialize input to state (B) matrix
@@ -226,11 +229,14 @@ class S5SSM(nn.Module):
                                 C_shape)
             self.C_tilde = self.C[..., 0] + 1j * self.C[..., 1]
 
+        
+
         # Initialize learnable discretization timescale value
         self.log_step = self.param("log_step",
                                    init_log_steps,
-                                   (self.expanded_P, self.dt_min, self.dt_max))
+                                   (self.H, self.dt_min, self.dt_max))
         step = self.step_rescale * np.exp(self.log_step[:, 0])
+        step = jnp.tile(step, (self.L, 1))
 
         # Discretize
         if self.discretization in ["zoh"]:
@@ -247,7 +253,8 @@ class S5SSM(nn.Module):
         self.D = self.param("D", normal(stddev=1.0), (self.L, self.H,))
         self.D_proj = nn.Dense(1)
 
-        self.output_proj = nn.Dense(self.P)
+        self.output_proj = nn.Dense(self.H)
+
 
     def __call__(self, input_sequence: jax.typing.ArrayLike):
         """
@@ -260,22 +267,26 @@ class S5SSM(nn.Module):
         """
         # Step 1: Input projection and reshaping
         B_proj = self.input_projB(input_sequence)  # shape: (B, L, expand * d_inner)
+        # B_proj = B_proj.reshape((self.L, self.expanded_P, self.H))
 
         Lambda_proj = self.input_projLambda(input_sequence)  # shape: (B, L, expand * d_inner)
+        Lambda_proj = Lambda_proj.reshape((self.L, self.expanded_P, self.H))
         Lambda_act = nn.silu(Lambda_proj)
 
         # Step 2: Convolution and activation
         B_conv = self.conv(B_proj)  # shape: (B, expand, seq_len, d_inner)
         B_act = nn.silu(B_conv)  # Apply activation function
+        B_act = B_act.reshape((self.L, self.expanded_P, self.H))
 
         # Compute input-dependent B_bar, C_bar, and Lambda_bar
-        B_bar = jnp.einsum('tij,tj->ti', self.B_bar, B_act) # nn.sigmoid(B_conv)
+        # B_bar = jnp.einsum('tij,tj->ti', self.B_bar, B_act) # nn.sigmoid(B_conv)
+        B_bar = self.B_bar * B_act
         Lambda_bar = nn.softplus(self.Lambda_bar + Lambda_act)
 
         _, xs = jax.lax.associative_scan(binary_operator, (Lambda_bar, B_bar))
 
-        # FIXME: shapes wrong
-        ys =  jax.vmap(lambda x: 2*(self.C_tilde @ x).real)(xs)
+        # ys =  jax.vmap(lambda x: 2*(self.C_tilde @ x).real)(xs)
+        ys =  (self.C_tilde @ xs).real
 
         # Gating mechanism
         gt = self.gated_proj(input_sequence)
