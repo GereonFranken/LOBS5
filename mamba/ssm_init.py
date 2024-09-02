@@ -1,4 +1,5 @@
 from jax import random
+import jax
 import jax.numpy as np
 from jax.nn.initializers import lecun_normal
 from jax.numpy.linalg import eigh
@@ -125,7 +126,8 @@ def init_VinvB(init_fun, rng, shape, Vinv):
              B_tilde (complex64) of shape (P,H,2)
      """
     B = init_fun(rng, shape)
-    VinvB = Vinv @ B
+    VinvB = jax.vmap(lambda b_: Vinv @ b_)(B)
+    # VinvB = Vinv @ B
     VinvB_real = VinvB.real
     VinvB_imag = VinvB.imag
     return np.concatenate((VinvB_real[..., None], VinvB_imag[..., None]), axis=-1)

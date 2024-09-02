@@ -3,7 +3,9 @@ from typing import Tuple
 import jax
 import jax.numpy as jnp
 from flax import linen as nn
+from mamba.ssm_init import make_DPLR_HiPPO
 from s5.layers import SequenceLayer
+from jax.scipy.linalg import block_diag
 from s5.seq_model import StackedEncoderModel, masked_meanpool
 
 
@@ -105,6 +107,7 @@ BatchLobPredModel = nn.vmap(
 
 class LobBookModel(nn.Module):
     ssm: nn.Module
+    book_seq_len: int
     d_book: int
     d_model: int
     #n_layers: int
@@ -122,10 +125,25 @@ class LobBookModel(nn.Module):
         """
         Initializes ...
         """
+        # Initialize state matrix A using approximation to HiPPO-LegS matrix
+        Lambda, _, B, V, B_orig = make_DPLR_HiPPO(64)
+        Lambda = Lambda[:64]
+        V = V[:, :64]
+        Vc = V.conj().T
+        # If initializing state matrix A as block-diagonal, put HiPPO approximation
+        # on each block
+        Lambda = (Lambda[..., None] * jnp.ones((4, 64, self.d_book))).ravel()
+        Lambda = Lambda.reshape((self.d_book, 4 * 64))
+        V = block_diag(*([V] * 4))
+        Vinv = block_diag(*([Vc] * 4))
         self.layers = tuple(
             SequenceLayer(
                 # fix ssm init to correct shape (different than other layers)
-                ssm=partial(self.ssm, H=self.d_book),
+                ssm=partial(self.ssm, L=self.book_seq_len, H=self.d_book, 
+                            Lambda_re_init=Lambda.real,
+                            Lambda_im_init=Lambda.imag,
+                            V=V,
+                            Vinv=Vinv,),
                 dropout=self.dropout,
                 d_model=self.d_book,  # take book series as is
                 activation=self.activation,
@@ -139,7 +157,11 @@ class LobBookModel(nn.Module):
         self.layers += (nn.Dense(self.d_model), )  # project to d_model
         self.layers += tuple(
             SequenceLayer(
-                ssm=self.ssm,
+                ssm=partial(self.ssm, L=self.book_seq_len, H=self.d_model,
+                            Lambda_re_init=Lambda.real,
+                            Lambda_im_init=Lambda.imag,
+                            V=V,
+                            Vinv=Vinv,),
                 dropout=self.dropout,
                 d_model=self.d_model,
                 activation=self.activation,
@@ -167,6 +189,7 @@ class LobBookModel(nn.Module):
 
 class FullLobPredModel(nn.Module):
     ssm: nn.Module
+    book_seq_len: int
     d_output: int
     d_model: int
     d_book: int
@@ -203,6 +226,7 @@ class FullLobPredModel(nn.Module):
         self.message_out_proj = nn.Dense(self.d_model)  
         self.book_encoder = LobBookModel(
             ssm=self.ssm,
+            book_seq_len=self.book_seq_len,
             d_book=self.d_book,
             d_model=self.d_model,
             n_pre_layers=self.n_book_pre_layers,
@@ -276,6 +300,7 @@ BatchFullLobPredModel = nn.vmap(
 
 class PaddedLobPredModel(nn.Module):
     ssm: nn.Module
+    book_seq_len: int
     d_output: int
     d_model: int
     d_book: int
@@ -310,6 +335,7 @@ class PaddedLobPredModel(nn.Module):
         #self.message_out_proj = nn.Dense(self.d_model)  
         self.book_encoder = LobBookModel(
             ssm=self.ssm,
+            book_seq_len=self.book_seq_len,
             d_book=self.d_book,
             d_model=self.d_model,
             n_pre_layers=self.n_book_pre_layers,

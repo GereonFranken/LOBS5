@@ -39,9 +39,10 @@ def discretize_zoh(Lambda, B_tilde, Delta):
             discretized Lambda_bar (complex64), B_bar (complex64)  (P,), (P,H)
     """
     Identity = np.ones((Lambda.shape[0], Lambda.shape[1]))
-    # Lambda_bar = np.exp(Lambda * Delta)
-    Lambda_bar = jax.vmap(lambda d: np.exp(Lambda * d))(Delta)
-    B_bar = (1/Lambda * (Lambda_bar-Identity)) * B_tilde
+    Delta_ = Delta[..., None] * np.ones((*Delta.shape, Lambda.shape[-1]))
+    Lambda_bar = jax.vmap(lambda d: np.exp(Lambda * d))(Delta_)
+    B_tilde_ = jnp.expand_dims(B_tilde, axis=1) * np.ones(Lambda_bar.shape)
+    B_bar = (1/Lambda * (Lambda_bar-Identity)) * B_tilde_
     return Lambda_bar, B_bar
 
 
@@ -157,7 +158,7 @@ class S5SSM(nn.Module):
         # self.expanded_P = self.expand_factor * self.P
         self.input_projB = nn.Dense(self.expanded_P * self.H)
         self.input_projLambda = nn.Dense(self.expanded_P * self.H)
-        self.gated_proj = nn.Dense(self.expanded_P * self.H)
+        self.gated_proj = nn.Dense(self.H)
         
         # Convolution layer
         self.conv = nn.Conv(
@@ -179,7 +180,7 @@ class S5SSM(nn.Module):
 
         # Initialize input to state (B) matrix
         B_init = lecun_normal()
-        B_shape = (self.L, self.expanded_P, self.H)  # (sequence length, feature dim, expanded state size)
+        B_shape = (self.L, self.expanded_P)  # (sequence length, feature dim, expanded state size)
         self.B = self.param("B",
                             lambda rng, shape: init_VinvB(B_init,
                                                           rng,
@@ -267,16 +268,18 @@ class S5SSM(nn.Module):
         """
         # Step 1: Input projection and reshaping
         B_proj = self.input_projB(input_sequence)  # shape: (B, L, expand * d_inner)
-        # B_proj = B_proj.reshape((self.L, self.expanded_P, self.H))
+        # B_proj = B_proj.reshape((self.L, self.H, self.expanded_P))
 
         Lambda_proj = self.input_projLambda(input_sequence)  # shape: (B, L, expand * d_inner)
-        Lambda_proj = Lambda_proj.reshape((self.L, self.expanded_P, self.H))
+        Lambda_proj = Lambda_proj.reshape((self.L, self.H, self.expanded_P))
         Lambda_act = nn.silu(Lambda_proj)
+
 
         # Step 2: Convolution and activation
         B_conv = self.conv(B_proj)  # shape: (B, expand, seq_len, d_inner)
         B_act = nn.silu(B_conv)  # Apply activation function
-        B_act = B_act.reshape((self.L, self.expanded_P, self.H))
+        B_act = B_act.reshape((self.L, self.H, self.expanded_P))
+
 
         # Compute input-dependent B_bar, C_bar, and Lambda_bar
         # B_bar = jnp.einsum('tij,tj->ti', self.B_bar, B_act) # nn.sigmoid(B_conv)
@@ -285,12 +288,15 @@ class S5SSM(nn.Module):
 
         _, xs = jax.lax.associative_scan(binary_operator, (Lambda_bar, B_bar))
 
-        # ys =  jax.vmap(lambda x: 2*(self.C_tilde @ x).real)(xs)
-        ys =  (self.C_tilde @ xs).real
+        ys =  jax.vmap(lambda x, c: (c @ x).real)(xs.reshape((self.L, self.expanded_P, self.H)), self.C_tilde)
+        # ys = jnp.einsum('lij, li -> lj', xs, self.C_tilde)
+        
+        # ys =  (self.C_tilde @ xs).real
 
         # Gating mechanism
         gt = self.gated_proj(input_sequence)
         gt = nn.silu(gt)
+        # gt = gt.reshape((self.L, self.H))
 
 
         # ys = apply_ssm(Lambda_bar,
@@ -302,13 +308,14 @@ class S5SSM(nn.Module):
 
         # Add feedthrough matrix output Du;
         D = self.D_proj(input_sequence)
-        D = jnp.broadcast_to(D, (D.shape[0], D.shape[1], self.D))
+        # D = jnp.broadcast_to(D, (self.L, self.H, self.expanded_P))
         D = nn.softplus(D)
-        Du = jax.vmap(lambda u: D * u)(input_sequence)
+        # Du = jax.vmap(lambda u: D * u)(input_sequence)
+        Du = D * input_sequence
 
-        ht = ys + Du
+        ht_pre_gate = ys + Du
         # gated multiplication: ℎ𝑡 = (1 − 𝑔𝑡)ℎ𝑡−1 + 𝑔𝑡𝑥t
-        ht = (1 - gt) * (Lambda_bar * ht) + gt * B_bar
+        ht = (1 - gt) * ht_pre_gate + gt * input_sequence
         return self.output_proj(ht)
 
 

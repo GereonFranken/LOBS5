@@ -105,8 +105,8 @@ def init_train_state(
     Vc = V.conj().T
     # If initializing state matrix A as block-diagonal, put HiPPO approximation
     # on each block
-    Lambda = (Lambda * np.ones((args.blocks, block_size, args.d_model))).ravel()
-    Lambda = Lambda.reshape((args.blocks * block_size, args.d_model))
+    Lambda = (Lambda[..., None] * np.ones((args.blocks, block_size, args.d_model))).ravel()
+    Lambda = Lambda.reshape((args.d_model, args.blocks * block_size))
     V = block_diag(*([V] * args.blocks))
     Vinv = block_diag(*([Vc] * args.blocks))
 
@@ -153,6 +153,7 @@ def init_train_state(
             #BatchPaddedLobPredModel,
             #model_cls,
             ssm=ssm_init_fn,
+            book_seq_len=book_seq_len,
             d_output=n_classes,
             d_model=args.d_model,
             d_book=book_dim,
@@ -174,6 +175,7 @@ def init_train_state(
         model_cls = partial(
             BatchLobPredModel,
             ssm=ssm_init_fn,
+            book_seq_len=book_seq_len,
             d_output=n_classes,
             d_model=args.d_model,
             n_layers=args.n_layers,
