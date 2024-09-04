@@ -3,7 +3,10 @@ from typing import Tuple
 import jax
 import jax.numpy as jnp
 from flax import linen as nn
+from lob.train_helpers import init_Lambda_V_Vinv
 from mamba.ssm_init import make_DPLR_HiPPO
+from constants import TrainArgs
+
 from s5.layers import SequenceLayer
 from jax.scipy.linalg import block_diag
 from s5.seq_model import StackedEncoderModel, masked_meanpool
@@ -106,6 +109,7 @@ BatchLobPredModel = nn.vmap(
 
 
 class LobBookModel(nn.Module):
+    args: TrainArgs
     ssm: nn.Module
     book_seq_len: int
     d_book: int
@@ -125,17 +129,7 @@ class LobBookModel(nn.Module):
         """
         Initializes ...
         """
-        # Initialize state matrix A using approximation to HiPPO-LegS matrix
-        Lambda, _, B, V, B_orig = make_DPLR_HiPPO(64)
-        Lambda = Lambda[:64]
-        V = V[:, :64]
-        Vc = V.conj().T
-        # If initializing state matrix A as block-diagonal, put HiPPO approximation
-        # on each block
-        Lambda = (Lambda[..., None] * jnp.ones((4, 64, self.d_book))).ravel()
-        Lambda = Lambda.reshape((self.d_book, 4 * 64))
-        V = block_diag(*([V] * 4))
-        Vinv = block_diag(*([Vc] * 4))
+        Lambda, V, Vinv = init_Lambda_V_Vinv(self.args, d_model=self.d_book)
         self.layers = tuple(
             SequenceLayer(
                 # fix ssm init to correct shape (different than other layers)
@@ -188,6 +182,7 @@ class LobBookModel(nn.Module):
         return x
 
 class FullLobPredModel(nn.Module):
+    args: TrainArgs
     ssm: nn.Module
     book_seq_len: int
     d_output: int
@@ -225,6 +220,7 @@ class FullLobPredModel(nn.Module):
         # applied to transposed message output to get seq len for fusion
         self.message_out_proj = nn.Dense(self.d_model)  
         self.book_encoder = LobBookModel(
+            args=self.args,
             ssm=self.ssm,
             book_seq_len=self.book_seq_len,
             d_book=self.d_book,

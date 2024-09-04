@@ -15,7 +15,7 @@ from lob.encoding import Vocab
 from lob.lob_seq_model import BatchFullLobPredModel, BatchLobPredModel, BatchPaddedLobPredModel, FullLobPredModel#, ParFullLobPredModel
 
 #from lob.lob_seq_model import BatchLobPredModel
-from lob.train_helpers import create_train_state, eval_step, prep_batch, cross_entropy_loss, compute_accuracy
+from lob.train_helpers import create_train_state, eval_step, init_Lambda_V_Vinv, prep_batch, cross_entropy_loss, compute_accuracy
 from mamba.ssm import init_S5SSM
 from mamba.ssm_init import make_DPLR_HiPPO
 # from s5.ssm import init_S5SSM
@@ -23,6 +23,8 @@ from mamba.ssm_init import make_DPLR_HiPPO
 from lob.lobster_dataloader import LOBSTER_Dataset, LOBSTER
 
 import lob.validation_helpers as valh
+from constants import TrainArgs
+
 
 
 def load_args_from_checkpoint(
@@ -70,7 +72,7 @@ def load_checkpoint(
 
 
 def init_train_state(
-        args: Namespace,
+        args: TrainArgs,
         n_classes: int,
         seq_len: int,
         book_dim: int,
@@ -80,36 +82,14 @@ def init_train_state(
 
     in_dim = n_classes
 
-    ssm_size = args.ssm_size_base
+    key = random.PRNGKey(args.jax_seed)
+    init_rng, train_rng = random.split(key, num=2)
+    
     ssm_lr = args.ssm_lr_base
 
     # Set global learning rate lr (e.g. encoders, etc.) as function of ssm_lr
     lr = args.lr_factor * ssm_lr
-
-    expand_factor = 2
-    # determine the size of initial blocks
-    block_size = int(ssm_size / args.blocks) * expand_factor
-
-    key = random.PRNGKey(args.jax_seed)
-    init_rng, train_rng = random.split(key, num=2)
-
-    # Initialize state matrix A using approximation to HiPPO-LegS matrix
-    Lambda, _, B, V, B_orig = make_DPLR_HiPPO(block_size)
-
-    if args.conj_sym:
-        block_size = block_size // 2
-        ssm_size = ssm_size // 2
-
-    Lambda = Lambda[:block_size]
-    V = V[:, :block_size]
-    Vc = V.conj().T
-    # If initializing state matrix A as block-diagonal, put HiPPO approximation
-    # on each block
-    Lambda = (Lambda[..., None] * np.ones((args.blocks, block_size, args.d_model))).ravel()
-    Lambda = Lambda.reshape((args.d_model, args.blocks * block_size))
-    V = block_diag(*([V] * args.blocks))
-    Vinv = block_diag(*([Vc] * args.blocks))
-
+    Lambda, V, Vinv = init_Lambda_V_Vinv(args)
 
     if print_shapes:
         print("Lambda.shape={}".format(Lambda.shape))
@@ -126,12 +106,12 @@ def init_train_state(
     ssm_init_fn = init_S5SSM(
         H=args.d_model,
         L=seq_len,
-        P=ssm_size,
+        P=args.ssm_size_base,
         Lambda_re_init=Lambda.real,
         Lambda_im_init=Lambda.imag,
         V=V,
         Vinv=Vinv,
-        expand_factor=expand_factor,
+        expand_factor=args.expand_factor,
         C_init=args.C_init,
         discretization=args.discretization,
         dt_min=args.dt_min,
@@ -152,6 +132,7 @@ def init_train_state(
             BatchFullLobPredModel,
             #BatchPaddedLobPredModel,
             #model_cls,
+            args=args,
             ssm=ssm_init_fn,
             book_seq_len=book_seq_len,
             d_output=n_classes,

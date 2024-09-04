@@ -1,3 +1,4 @@
+from argparse import Namespace
 from functools import partial
 import numpy as onp
 import jax
@@ -7,15 +8,19 @@ from tqdm import tqdm
 from flax.training import train_state
 from flax import jax_utils
 import optax
+from jax.scipy.linalg import block_diag
 from typing import Any, Dict, Optional, Tuple, Union
 import torch
 
-from lob.lob_seq_model import LobPredModel
+from mamba.ssm_init import make_DPLR_HiPPO
+from constants import TrainArgs
+
 
 if torch.cuda.is_available():
     BACKEND = "gpu"
 else:
     BACKEND = "cpu"
+
 
 
 # LR schedulers
@@ -136,7 +141,6 @@ def create_train_state(model_cls,
     # i.e. batch is split between GPUs but dummy data is per GPU
     assert bsz % num_devices == 0
     bsz = bsz // num_devices
-
     if padded:
         if retrieval:
             # For retrieval tasks we have two different sets of "documents"
@@ -563,3 +567,29 @@ def eval_step(
     accs = compute_accuracy(logits, batch_labels)
 
     return losses, accs, logits
+
+def init_Lambda_V_Vinv(args: TrainArgs, d_model: Optional[int]=None):
+    ssm_size = args.ssm_size_base
+
+    # determine the size of initial blocks
+    block_size = int(ssm_size / args.blocks) * args.expand_factor
+
+    # Initialize state matrix A using approximation to HiPPO-LegS matrix
+    Lambda, _, B, V, B_orig = make_DPLR_HiPPO(block_size)
+
+
+    if args.conj_sym:
+        block_size = block_size // 2
+        ssm_size = ssm_size // 2
+
+    Lambda = Lambda[:block_size]
+    V = V[:, :block_size]
+    Vc = V.conj().T
+    # If initializing state matrix A as block-diagonal, put HiPPO approximation
+    # on each block
+    d_model = d_model if d_model else args.d_model
+    Lambda = (Lambda[..., None] * np.ones((args.blocks, block_size, d_model))).ravel()
+    Lambda = Lambda.reshape((d_model, args.blocks * block_size))
+    V = block_diag(*([V] * args.blocks))
+    Vinv = block_diag(*([Vc] * args.blocks))
+    return Lambda, V, Vinv

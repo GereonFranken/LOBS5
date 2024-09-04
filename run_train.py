@@ -3,6 +3,7 @@
 #os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=48'
 
 import argparse
+from constants import TrainArgs
 from s5.utils.util import str2bool
 from lob.train import train
 from lob.dataloading import Datasets
@@ -75,6 +76,8 @@ if __name__ == "__main__":
 						help="SSM Latent size, i.e. P")
 	parser.add_argument("--blocks", type=int, default=8,  # 8, 4
 						help="How many blocks, J, to initialize with")
+	parser.add_argument("--expand_factor", type=int, default=2,
+						help="By what factor to expand the state size for mamba")
 	parser.add_argument("--C_init", type=str, default="trunc_standard_normal",
 						choices=["trunc_standard_normal", "lecun_normal", "complex_normal"],
 						help="Options for initialization of C: \\"
@@ -147,5 +150,6 @@ if __name__ == "__main__":
 						help="seed randomness")
 
 	#with jax.profiler.trace("/tmp/jax-trace", create_perfetto_link=True):
-	train(parser.parse_args())
+	args = TrainArgs(**vars(parser.parse_args()))
+	train(args)
 	#cProfile.run('train(parser.parse_args())')

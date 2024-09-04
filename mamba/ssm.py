@@ -153,6 +153,7 @@ class S5SSM(nn.Module):
             local_P = 2 * self.P
         else:
             local_P = self.P
+        
 
         self.expanded_P = self.expand_factor * local_P
         # self.expanded_P = self.expand_factor * self.P
@@ -266,6 +267,7 @@ class S5SSM(nn.Module):
         Returns:
             output sequence (float32): (L, H)
         """
+
         # Step 1: Input projection and reshaping
         B_proj = self.input_projB(input_sequence)  # shape: (B, L, expand * d_inner)
         # B_proj = B_proj.reshape((self.L, self.H, self.expanded_P))
@@ -276,6 +278,7 @@ class S5SSM(nn.Module):
 
 
         # Step 2: Convolution and activation
+        print("Computing Convolutional Layer for B projection")
         B_conv = self.conv(B_proj)  # shape: (B, expand, seq_len, d_inner)
         B_act = nn.silu(B_conv)  # Apply activation function
         B_act = B_act.reshape((self.L, self.H, self.expanded_P))
@@ -288,16 +291,11 @@ class S5SSM(nn.Module):
 
         _, xs = jax.lax.associative_scan(binary_operator, (Lambda_bar, B_bar))
 
+
         ys =  jax.vmap(lambda x, c: (c @ x).real)(xs.reshape((self.L, self.expanded_P, self.H)), self.C_tilde)
         # ys = jnp.einsum('lij, li -> lj', xs, self.C_tilde)
         
         # ys =  (self.C_tilde @ xs).real
-
-        # Gating mechanism
-        gt = self.gated_proj(input_sequence)
-        gt = nn.silu(gt)
-        # gt = gt.reshape((self.L, self.H))
-
 
         # ys = apply_ssm(Lambda_bar,
         #                B_bar,
@@ -314,6 +312,11 @@ class S5SSM(nn.Module):
         Du = D * input_sequence
 
         ht_pre_gate = ys + Du
+
+        # Gating mechanism
+        gt = self.gated_proj(input_sequence)
+        gt = nn.silu(gt)
+        # gt = gt.reshape((self.L, self.H))
         # gated multiplication: ℎ𝑡 = (1 − 𝑔𝑡)ℎ𝑡−1 + 𝑔𝑡𝑥t
         ht = (1 - gt) * ht_pre_gate + gt * input_sequence
         return self.output_proj(ht)

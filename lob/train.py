@@ -1,84 +1,71 @@
-import asyncio
-from concurrent import futures
-from functools import partial
-import functools
 import os
 import pathlib
-from typing import List, Optional, Sequence
-from flax.training import train_state
-import flax
-import flax.training
 from jax import random
-import jax.numpy as np
 import orbax.checkpoint as ocp
-from jax.scipy.linalg import block_diag
 from flax.training import checkpoints
-from lob.lob_seq_model import BatchFullLobPredModel, BatchLobPredModel, BatchPaddedLobPredModel
 import wandb
 
 from lob.init_train import init_train_state, load_checkpoint
 from lob.dataloading import Datasets, create_lobster_prediction_dataset, create_lobster_train_loader
-from lob.lobster_dataloader import LOBSTER, LOBSTER_Dataset
+from lob.lobster_dataloader import LOBSTER_Dataset
 from lob.train_helpers import create_train_state, reduce_lr_on_plateau,\
     linear_warmup, cosine_annealing, constant_lr, train_epoch, validate
-from s5.ssm import init_S5SSM
-from s5.ssm_init import make_DPLR_HiPPO
+from constants import TrainArgs
+
+# class TrainStateHandler(ocp.pytree_checkpoint_handler.TypeHandler):
+#         """Serializes MyState to the numpy npz format."""
 
 
-class TrainStateHandler(ocp.pytree_checkpoint_handler.TypeHandler):
-        """Serializes MyState to the numpy npz format."""
+#         def __init__(self):
+#             self._executor = futures.ThreadPoolExecutor(max_workers=1)
+#             # self.ParamInfo = ocp.pytree_checkpoint_handler.ParamInfo
+#             # self.MetaData = ocp.metadata.Metadata
+
+#         def typestr(self) -> str:
+#             return 'TrainState'
+
+#         async def serialize(
+#             self,
+#             value: train_state.TrainState,
+#             # infos: Sequence[ParamInfo],
+#             args: Optional[Sequence[ocp.SaveArgs]],
+#         ) -> List[futures.Future]:
+#             # state_dict = flax.serialization.to_state_dict(value)
+#             serialized_dict = {}
+#             for key, val in value.items():
+#                 if isinstance(val, flax.core.frozen_dict.FrozenDict):
+#                     serialized_dict[key] = flax.serialization.to_state_dict(val)
+#                 else:
+#                     serialized_dict[key] = val
+#             return serialized_dict
+#             # return state_dict
+
+#         async def deserialize(
+#             self,
+#             value: dict,
+#             # infos: Sequence[ParamInfo],
+#             args: Optional[Sequence[ocp.RestoreArgs]] = None,
+#         ) -> train_state.TrainState:
+#             # state_dict = value
+#             deserialized_dict = {}
+#             for key, val in value.items():
+#                 if isinstance(val, dict) and 'collection' in val:
+#                     deserialized_dict[key] = flax.serialization.from_state_dict(flax.core.unfreeze(val), val)
+#                 else:
+#                     deserialized_dict[key] = val
+#             return deserialized_dict
+#             # return flax.serialization.from_state_dict(flax.core.unfreeze(value), state_dict)
+
+#         async def metadata(self):#, infos: Sequence[ParamInfo]) -> Sequence[Metadata]:
+#             # This method is explained in a separate section.
+#             return []
+#             # return [Metadata(name=info.name, directory=info.path) for info in infos]
+# ocp.type_handlers.register_type_handler(
+#     train_state.TrainState, TrainStateHandler(), override=True
+# )
 
 
-        def __init__(self):
-            self._executor = futures.ThreadPoolExecutor(max_workers=1)
-            # self.ParamInfo = ocp.pytree_checkpoint_handler.ParamInfo
-            # self.MetaData = ocp.metadata.Metadata
-
-        def typestr(self) -> str:
-            return 'TrainState'
-
-        async def serialize(
-            self,
-            value: train_state.TrainState,
-            # infos: Sequence[ParamInfo],
-            args: Optional[Sequence[ocp.SaveArgs]],
-        ) -> List[futures.Future]:
-            # state_dict = flax.serialization.to_state_dict(value)
-            serialized_dict = {}
-            for key, val in value.items():
-                if isinstance(val, flax.core.frozen_dict.FrozenDict):
-                    serialized_dict[key] = flax.serialization.to_state_dict(val)
-                else:
-                    serialized_dict[key] = val
-            return serialized_dict
-            # return state_dict
-
-        async def deserialize(
-            self,
-            value: dict,
-            # infos: Sequence[ParamInfo],
-            args: Optional[Sequence[ocp.RestoreArgs]] = None,
-        ) -> train_state.TrainState:
-            # state_dict = value
-            deserialized_dict = {}
-            for key, val in value.items():
-                if isinstance(val, dict) and 'collection' in val:
-                    deserialized_dict[key] = flax.serialization.from_state_dict(flax.core.unfreeze(val), val)
-                else:
-                    deserialized_dict[key] = val
-            return deserialized_dict
-            # return flax.serialization.from_state_dict(flax.core.unfreeze(value), state_dict)
-
-        async def metadata(self):#, infos: Sequence[ParamInfo]) -> Sequence[Metadata]:
-            # This method is explained in a separate section.
-            return []
-            # return [Metadata(name=info.name, directory=info.path) for info in infos]
-ocp.type_handlers.register_type_handler(
-    train_state.TrainState, TrainStateHandler(), override=True
-)
-
-
-def train(args):
+def train(args: TrainArgs):
     """
     Main function to train over a certain number of epochs
     """
@@ -88,16 +75,14 @@ def train(args):
 
     # for parameter sweep: get args from wandb server
 
-    # if args is None:
-    #     args = wandb.config
-    # else:
-    #     if args.USE_WANDB:
-    #         # Make wandb config dictionary
-    #         run = wandb.init(mode='offline')
-
-    #         # run = wandb.init(project=args.wandb_project, job_type='model_training', config=vars(args), entity=args.wandb_entity)
-    #     else:
-    #         run = wandb.init(mode='offline')
+    if args is None:
+        args = wandb.config
+    else:
+        if args.USE_WANDB:
+            # Make wandb config dictionary
+            run = wandb.init(project=args.wandb_project, job_type='model_training', config=vars(args), entity=args.wandb_entity)
+        else:
+            run = wandb.init(mode='offline')
 
     ssm_size = args.ssm_size_base
     ssm_lr = args.ssm_lr_base
@@ -307,39 +292,39 @@ def train(args):
             f" {best_test_acc:.4f} at Epoch {best_epoch + 1}\n"
         )
 
-        # if valloader is not None:
-        #     wandb.log(
-        #         {
-        #             "Training Loss": train_loss,
-        #             "Val loss": val_loss,
-        #             "Val Accuracy": val_acc,
-        #             "Test Loss": test_loss,
-        #             "Test Accuracy": test_acc,
-        #             "count": count,
-        #             "Learning rate count": lr_count,
-        #             "Opt acc": opt_acc,
-        #             "lr": state.opt_state.inner_states['regular'].inner_state.hyperparams['learning_rate'],
-        #             "ssm_lr": state.opt_state.inner_states['ssm'].inner_state.hyperparams['learning_rate']
-        #         }
-        #     )
-        # else:
-        #     wandb.log(
-        #         {
-        #             "Training Loss": train_loss,
-        #             "Val loss": val_loss,
-        #             "Val Accuracy": val_acc,
-        #             "count": count,
-        #             "Learning rate count": lr_count,
-        #             "Opt acc": opt_acc,
-        #             "lr": state.opt_state.inner_states['regular'].inner_state.hyperparams['learning_rate'],
-        #             "ssm_lr": state.opt_state.inner_states['ssm'].inner_state.hyperparams['learning_rate']
-        #         }
-        #     )
-        # wandb.run.summary["Best Val Loss"] = best_loss
-        # wandb.run.summary["Best Val Accuracy"] = best_acc
-        # wandb.run.summary["Best Epoch"] = best_epoch
-        # wandb.run.summary["Best Test Loss"] = best_test_loss
-        # wandb.run.summary["Best Test Accuracy"] = best_test_acc
+        if valloader is not None:
+            wandb.log(
+                {
+                    "Training Loss": train_loss,
+                    "Val loss": val_loss,
+                    "Val Accuracy": val_acc,
+                    "Test Loss": test_loss,
+                    "Test Accuracy": test_acc,
+                    "count": count,
+                    "Learning rate count": lr_count,
+                    "Opt acc": opt_acc,
+                    "lr": state.opt_state.inner_states['regular'].inner_state.hyperparams['learning_rate'],
+                    "ssm_lr": state.opt_state.inner_states['ssm'].inner_state.hyperparams['learning_rate']
+                }
+            )
+        else:
+            wandb.log(
+                {
+                    "Training Loss": train_loss,
+                    "Val loss": val_loss,
+                    "Val Accuracy": val_acc,
+                    "count": count,
+                    "Learning rate count": lr_count,
+                    "Opt acc": opt_acc,
+                    "lr": state.opt_state.inner_states['regular'].inner_state.hyperparams['learning_rate'],
+                    "ssm_lr": state.opt_state.inner_states['ssm'].inner_state.hyperparams['learning_rate']
+                }
+            )
+        wandb.run.summary["Best Val Loss"] = best_loss
+        wandb.run.summary["Best Val Accuracy"] = best_acc
+        wandb.run.summary["Best Epoch"] = best_epoch
+        wandb.run.summary["Best Test Loss"] = best_test_loss
+        wandb.run.summary["Best Test Accuracy"] = best_test_acc
 
         if count > args.early_stop_patience:
             break
