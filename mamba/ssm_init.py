@@ -58,16 +58,13 @@ def make_DPLR_HiPPO(N):
 
     S = A + P[:, np.newaxis] * P[np.newaxis, :]
 
-    S_diag = np.diagonal(S)
-    Lambda_real = np.mean(S_diag) * np.ones_like(S_diag)
-
     # Diagonalize S to V \Lambda V^*
-    Lambda_imag, V = eigh(S * -1j)
+    Lambda, V = eigh(S)
 
     P = V.conj().T @ P
     B_orig = B
     B = V.conj().T @ B
-    return Lambda_real + 1j * Lambda_imag, P, B, V, B_orig
+    return Lambda, P, B, V, B_orig
 
 
 def log_step_initializer(dt_min=0.001, dt_max=0.1):
@@ -128,6 +125,7 @@ def init_VinvB(init_fun, rng, shape, Vinv):
     B = init_fun(rng, shape)
     VinvB = jax.vmap(lambda b_: Vinv @ b_)(B)
     # VinvB = Vinv @ B
+    return VinvB
     VinvB_real = VinvB.real
     VinvB_imag = VinvB.imag
     return np.concatenate((VinvB_real[..., None], VinvB_imag[..., None]), axis=-1)
@@ -162,9 +160,10 @@ def init_CV(init_fun, rng, shape, V):
          Returns:
              C_tilde (complex64) of shape (H,P,2)
      """
-    C_ = init_fun(rng, shape)
-    C = C_[..., 0] + 1j * C_[..., 1]
+    C = init_fun(rng, shape)
+    # C = C_[..., 0] + 1j * C_[..., 1]
     CV = C @ V
+    return CV
     CV_real = CV.real
     CV_imag = CV.imag
     return np.concatenate((CV_real[..., None], CV_imag[..., None]), axis=-1)

@@ -2,7 +2,6 @@ import torch
 from pathlib import Path
 import os
 from typing import Callable, Optional, TypeVar, Dict, Tuple, List, Union
-from torch.utils.data import Sampler
 
 DEFAULT_CACHE_DIR_ROOT = Path('./cache_dir/')
 
@@ -27,9 +26,7 @@ def make_data_loader(dset,
 					 batch_size: int=128,
 					 shuffle: bool=True,
 					 drop_last: bool=True,
-					 collate_fn: callable=None,
-					 sampler: Optional[Sampler]=None,
-					 num_workers: int = 0):
+					 collate_fn: callable=None):
 	"""
 
 	:param dset: 			(PT dset):		PyTorch dataset object.
@@ -52,15 +49,9 @@ def make_data_loader(dset,
 		assert collate_fn is None
 		collate_fn = dobj._collate_fn
 
-	if sampler is not None:
-		shuffle = False
-		drop_last = False
-
 	# Generate the dataloaders.
-	return torch.utils.data.DataLoader(
-		dataset=dset, collate_fn=collate_fn, batch_size=batch_size, shuffle=shuffle,
-		drop_last=drop_last, generator=rng, sampler=sampler, num_workers=num_workers)#,
-		# prefetch_factor=3)
+	return torch.utils.data.DataLoader(dataset=dset, collate_fn=collate_fn, batch_size=batch_size, shuffle=shuffle,
+									   drop_last=drop_last, generator=rng)
 
 
 def create_lra_imdb_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_CACHE_DIR_ROOT,
@@ -396,13 +387,6 @@ def create_pmnist_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_C
 	return trn_loader, val_loader, tst_loader, aux_loaders, N_CLASSES, SEQ_LENGTH, IN_DIM, TRAIN_SIZE
 
 
-def create_lobster_prediction_dataset(cache_dir: Union[str, Path] = DEFAULT_CACHE_DIR_ROOT,
-									  seed: int = 42,
-									  bsz: int=128) -> ReturnType:
-	""" TODO
-	"""
-	pass
-
 Datasets = {
 	# Other loaders.
 	"mnist-classification": create_mnist_classification_dataset,
@@ -419,7 +403,4 @@ Datasets = {
 
 	# Speech.
 	"speech35-classification": create_speechcommands35_classification_dataset,
-
-	# financial data
-	"lobster-prediction": create_lobster_prediction_dataset,
 }

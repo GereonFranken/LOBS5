@@ -10,13 +10,14 @@ from flax import jax_utils
 import optax
 from jax.scipy.linalg import block_diag
 from typing import Any, Dict, Optional, Tuple, Union
+import sys
 import torch
 
 from mamba.ssm_init import make_DPLR_HiPPO
 from constants import TrainArgs
 
 
-if torch.cuda.is_available():
+if torch.cuda.is_available() or sys.platform == "darwin":
     BACKEND = "gpu"
 else:
     BACKEND = "cpu"
@@ -572,11 +573,10 @@ def init_Lambda_V_Vinv(args: TrainArgs, d_model: Optional[int]=None):
     ssm_size = args.ssm_size_base
 
     # determine the size of initial blocks
-    block_size = int(ssm_size / args.blocks) * args.expand_factor
+    block_size = int(ssm_size / args.blocks) #* args.expand_factor
 
     # Initialize state matrix A using approximation to HiPPO-LegS matrix
     Lambda, _, B, V, B_orig = make_DPLR_HiPPO(block_size)
-
 
     if args.conj_sym:
         block_size = block_size // 2
@@ -587,9 +587,9 @@ def init_Lambda_V_Vinv(args: TrainArgs, d_model: Optional[int]=None):
     Vc = V.conj().T
     # If initializing state matrix A as block-diagonal, put HiPPO approximation
     # on each block
-    d_model = d_model if d_model else args.d_model
-    Lambda = (Lambda[..., None] * np.ones((args.blocks, block_size, d_model))).ravel()
-    Lambda = Lambda.reshape((d_model, args.blocks * block_size))
+    d_model_expanded = d_model * args.expand_factor if d_model else args.d_model * args.expand_factor
+    Lambda = (Lambda[..., None] * np.ones((args.blocks, block_size, d_model_expanded))).ravel()
+    Lambda = Lambda.reshape((d_model_expanded, args.blocks * block_size))
     V = block_diag(*([V] * args.blocks))
     Vinv = block_diag(*([Vc] * args.blocks))
     return Lambda, V, Vinv

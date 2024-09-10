@@ -1,7 +1,6 @@
 from functools import partial
 import jax
 import jax.numpy as np
-import jax.numpy as jnp
 from flax import linen as nn
 from jax.nn.initializers import lecun_normal, normal
 
@@ -90,10 +89,10 @@ def apply_ssm(Lambda_bar, B_bar, C_tilde, input_sequence, conj_sym, bidirectiona
 
 
 class S5SSM(nn.Module):
-    Lambda_re_init: jnp.ndarray
-    Lambda_im_init: jnp.ndarray
-    V: jnp.ndarray
-    Vinv: jnp.ndarray
+    Lambda_re_init: np.DeviceArray
+    Lambda_im_init: np.DeviceArray
+    V: np.DeviceArray
+    Vinv: np.DeviceArray
 
     H: int
     P: int

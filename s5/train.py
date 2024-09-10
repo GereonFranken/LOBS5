@@ -19,7 +19,7 @@ def train(args):
 
     best_test_loss = 100000000
     best_test_acc = -10000.0
-    
+
     if args.USE_WANDB:
         # Make wandb config dictionary
         wandb.init(project=args.wandb_project, job_type='model_training', config=vars(args), entity=args.wandb_entity)
@@ -92,7 +92,7 @@ def train(args):
     print("Lambda.shape={}".format(Lambda.shape))
     print("V.shape={}".format(V.shape))
     print("Vinv.shape={}".format(Vinv.shape))
-    
+
     ssm_init_fn = init_S5SSM(H=args.d_model,
                              P=ssm_size,
                              Lambda_re_init=Lambda.real,

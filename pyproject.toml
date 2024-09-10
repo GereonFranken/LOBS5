@@ -9,8 +9,8 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.12"
 numpy = "<2.0.0"
-# jax = "^0.4.2"
-jax = { extras = ["cuda12"], version = "^0.4.31" }
+# jax = { extras = ["cuda12"], version = "^0.4.31" }
+jax = "^0.4.31" 
 torch = "^2.4.0"
 torchvision = "^0.19.0"
 torchaudio = "^2.4.0"

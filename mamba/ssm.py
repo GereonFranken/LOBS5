@@ -39,7 +39,8 @@ def discretize_zoh(Lambda, B_tilde, Delta):
             discretized Lambda_bar (complex64), B_bar (complex64)  (P,), (P,H)
     """
     Identity = np.ones((Lambda.shape[0], Lambda.shape[1]))
-    Delta_ = Delta[..., None] * np.ones((*Delta.shape, Lambda.shape[-1]))
+    assert Lambda.shape[1] == Delta.shape[1]
+    Delta_ = Delta.reshape(Delta.shape[0], 1, Delta.shape[1]) * np.ones((Delta.shape[0], *Lambda.shape))
     Lambda_bar = jax.vmap(lambda d: np.exp(Lambda * d))(Delta_)
     B_tilde_ = jnp.expand_dims(B_tilde, axis=1) * np.ones(Lambda_bar.shape)
     B_bar = (1/Lambda * (Lambda_bar-Identity)) * B_tilde_
@@ -147,53 +148,56 @@ class S5SSM(nn.Module):
         """Initializes parameters once and performs discretization each time
            the SSM is applied to a sequence
         """
-        if self.conj_sym:
-            # Need to account for case where we actually sample real B and C, and then multiply
-            # by the half sized Vinv and possibly V
-            local_P = 2 * self.P
-        else:
-            local_P = self.P
+        # if self.conj_sym:
+        #     # Need to account for case where we actually sample real B and C, and then multiply
+        #     # by the half sized Vinv and possibly V
+        #     self.local_P = 2 * self.P
+        # else:
+        #     self.local_P = self.P
         
 
-        self.expanded_P = self.expand_factor * local_P
-        # self.expanded_P = self.expand_factor * self.P
-        self.input_projB = nn.Dense(self.expanded_P * self.H)
-        self.input_projLambda = nn.Dense(self.expanded_P * self.H)
-        self.gated_proj = nn.Dense(self.H)
+        self.expanded_H = self.expand_factor * self.H
+        # combine two input projections to one layer
+        self.input_proj = nn.Dense(2 * self.expanded_H)
+        # self.input_projLambda = nn.Dense(self.expanded_P * self.H)
+        self.gated_proj = nn.Dense(self.expanded_H)
         
         # Convolution layer
         self.conv = nn.Conv(
-            features=self.expanded_P * self.H,
+            features=self.expanded_H, # * self.H,
             kernel_size=(self.kernel_size,),
             padding='SAME'
         ) 
 
 
         # Initialize diagonal state to state matrix Lambda (eigenvalues)
-        self.Lambda_re = self.param("Lambda_re", lambda rng, shape: self.Lambda_re_init, (None,))
-        self.Lambda_im = self.param("Lambda_im", lambda rng, shape: self.Lambda_im_init, (None,))
+        self.Lambda = self.param("Lambda_re", lambda rng, shape: self.Lambda_re_init, (None,))
+        # self.Lambda_im = self.param("Lambda_im", lambda rng, shape: self.Lambda_im_init, (None,))
         if self.clip_eigs:
-            self.Lambda = np.clip(self.Lambda_re, None, -1e-4) + 1j * self.Lambda_im
-        else:
-            self.Lambda = self.Lambda_re + 1j * self.Lambda_im
+            self.Lambda = np.clip(self.Lambda, None, -1e-4)#  + 1j * self.Lambda_im
+        # else:
+        #     self.Lambda = self.Lambda_re + 1j * self.Lambda_im
         # self.Lambda = jnp.tile(self.Lambda, self.L).reshape((self.L, self.expanded_P))
         
 
         # Initialize input to state (B) matrix
         B_init = lecun_normal()
-        B_shape = (self.L, self.expanded_P)  # (sequence length, feature dim, expanded state size)
+        B_shape = (self.L, self.P)  # (sequence length, feature dim, expanded state size)
         self.B = self.param("B",
                             lambda rng, shape: init_VinvB(B_init,
                                                           rng,
                                                           shape,
                                                           self.Vinv),
                             B_shape)
-        self.B_tilde = self.B[..., 0] + 1j * self.B[..., 1]
+        # self.B_tilde = self.B[..., 0] + 1j * self.B[..., 1]
+        self.B_tilde = self.B
 
         # Initialize state to output (C) matrix
-        C_shape = (self.L, self.expanded_P, 2)
+        C_shape = (self.L, self.P)
         if self.C_init in ["trunc_standard_normal"]:
-            C_init = trunc_standard_normal
+            # TODO: Can trunc_standard_normal be removed? since complex numbers are not required anymore
+            # C_init = trunc_standard_normal
+            C_init = lecun_normal()
         elif self.C_init in ["lecun_normal"]:
             C_init = lecun_normal()
         elif self.C_init in ["complex_normal"]:
@@ -210,7 +214,8 @@ class S5SSM(nn.Module):
 
             # else:
             self.C = self.param("C", C_init, C_shape)
-            self.C_tilde = self.C[..., 0] + 1j * self.C[..., 1]
+            self.C_tilde = self.C
+            # self.C_tilde = self.C[..., 0] + 1j * self.C[..., 1]
 
         else:
             # if self.bidirectional:
@@ -229,14 +234,15 @@ class S5SSM(nn.Module):
             self.C = self.param("C",
                                 lambda rng, shape: init_CV(C_init, rng, shape, self.V),
                                 C_shape)
-            self.C_tilde = self.C[..., 0] + 1j * self.C[..., 1]
+            self.C_tilde = self.C
+            # self.C_tilde = self.C[..., 0] + 1j * self.C[..., 1]
 
         
 
         # Initialize learnable discretization timescale value
         self.log_step = self.param("log_step",
                                    init_log_steps,
-                                   (self.H, self.dt_min, self.dt_max))
+                                   (self.P, self.dt_min, self.dt_max))
         step = self.step_rescale * np.exp(self.log_step[:, 0])
         step = jnp.tile(step, (self.L, 1))
 
@@ -252,7 +258,7 @@ class S5SSM(nn.Module):
         # self.C_proj = nn.Dense(local_P)
         # self.Lambda_proj = nn.Dense(local_P)
         # Initialize feedthrough (D) matrix
-        self.D = self.param("D", normal(stddev=1.0), (self.L, self.H,))
+        self.D = self.param("D", normal(stddev=1.0), (self.L, self.expanded_H,))
         self.D_proj = nn.Dense(1)
 
         self.output_proj = nn.Dense(self.H)
@@ -267,59 +273,34 @@ class S5SSM(nn.Module):
         Returns:
             output sequence (float32): (L, H)
         """
-
-        # Step 1: Input projection and reshaping
-        B_proj = self.input_projB(input_sequence)  # shape: (B, L, expand * d_inner)
-        # B_proj = B_proj.reshape((self.L, self.H, self.expanded_P))
-
-        Lambda_proj = self.input_projLambda(input_sequence)  # shape: (B, L, expand * d_inner)
-        Lambda_proj = Lambda_proj.reshape((self.L, self.H, self.expanded_P))
+        B_proj, Lambda_proj = jnp.split(self.input_proj(input_sequence), 2, axis=-1)
         Lambda_act = nn.silu(Lambda_proj)
 
-
-        # Step 2: Convolution and activation
-        print("Computing Convolutional Layer for B projection")
         B_conv = self.conv(B_proj)  # shape: (B, expand, seq_len, d_inner)
         B_act = nn.silu(B_conv)  # Apply activation function
-        B_act = B_act.reshape((self.L, self.H, self.expanded_P))
 
-
-        # Compute input-dependent B_bar, C_bar, and Lambda_bar
-        # B_bar = jnp.einsum('tij,tj->ti', self.B_bar, B_act) # nn.sigmoid(B_conv)
-        B_bar = self.B_bar * B_act
-        Lambda_bar = nn.softplus(self.Lambda_bar + Lambda_act)
-
-        _, xs = jax.lax.associative_scan(binary_operator, (Lambda_bar, B_bar))
-
-
-        ys =  jax.vmap(lambda x, c: (c @ x).real)(xs.reshape((self.L, self.expanded_P, self.H)), self.C_tilde)
-        # ys = jnp.einsum('lij, li -> lj', xs, self.C_tilde)
+        B_bar = jnp.einsum("lhp, lh -> lhp", self.B_bar, B_act)
+        Lambda_bar = nn.softplus(self.Lambda_bar + Lambda_act.reshape(self.L, self.expanded_H, 1))
         
-        # ys =  (self.C_tilde @ xs).real
-
-        # ys = apply_ssm(Lambda_bar,
-        #                B_bar,
-        #                self.C_tilde,
-        #                input_sequence,
-        #                self.conj_sym,
-        #                self.bidirectional)
+        _, xs = jax.lax.associative_scan(binary_operator, (Lambda_bar, B_bar))
+        ys =  jax.vmap(lambda x, c: (x @ c).real)(xs, self.C_tilde)
 
         # Add feedthrough matrix output Du;
         D = self.D_proj(input_sequence)
-        # D = jnp.broadcast_to(D, (self.L, self.H, self.expanded_P))
-        D = nn.softplus(D)
-        # Du = jax.vmap(lambda u: D * u)(input_sequence)
-        Du = D * input_sequence
+        Du = nn.softplus(D) * B_act
+        # Du = D * input_sequence
 
-        ht_pre_gate = ys + Du
+        y = (ys + Du) * Lambda_act
+
+        # ht_pre_gate = ys + D
 
         # Gating mechanism
-        gt = self.gated_proj(input_sequence)
-        gt = nn.silu(gt)
+        # gt = self.gated_proj(input_sequence)
+        # gt = nn.silu(gt)
         # gt = gt.reshape((self.L, self.H))
         # gated multiplication: ℎ𝑡 = (1 − 𝑔𝑡)ℎ𝑡−1 + 𝑔𝑡𝑥t
-        ht = (1 - gt) * ht_pre_gate + gt * input_sequence
-        return self.output_proj(ht)
+        # ht = (1 - gt) * ht_pre_gate + gt * input_sequence
+        return self.output_proj(y)
 
 
 def init_S5SSM(H,

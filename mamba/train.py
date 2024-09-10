@@ -4,6 +4,9 @@ import jax.numpy as np
 from jax.scipy.linalg import block_diag
 import wandb
 
+from constants import TrainArgs
+from lob.train_helpers import init_Lambda_V_Vinv
+
 from .train_helpers import create_train_state, reduce_lr_on_plateau,\
     linear_warmup, cosine_annealing, constant_lr, train_epoch, validate
 from .dataloading import Datasets
@@ -12,7 +15,7 @@ from .ssm import init_S5SSM
 from .ssm_init import make_DPLR_HiPPO
 
 
-def train(args):
+def train(args: TrainArgs):
     """
     Main function to train over a certain number of epochs
     """
@@ -72,22 +75,7 @@ def train(args):
 
     print(f"[*] Starting S5 Training on `{args.dataset}` =>> Initializing...")
 
-    # Initialize state matrix A using approximation to HiPPO-LegS matrix
-    Lambda, _, B, V, B_orig = make_DPLR_HiPPO(block_size)
-
-    if args.conj_sym:
-        block_size = block_size // 2
-        ssm_size = ssm_size // 2
-
-    Lambda = Lambda[:block_size]
-    V = V[:, :block_size]
-    Vc = V.conj().T
-
-    # If initializing state matrix A as block-diagonal, put HiPPO approximation
-    # on each block
-    Lambda = (Lambda * np.ones((args.blocks, block_size))).ravel()
-    V = block_diag(*([V] * args.blocks))
-    Vinv = block_diag(*([Vc] * args.blocks))
+    Lambda, V, Vinv = init_Lambda_V_Vinv(args)
 
     print("Lambda.shape={}".format(Lambda.shape))
     print("V.shape={}".format(V.shape))
@@ -100,6 +88,7 @@ def train(args):
                              Lambda_im_init=Lambda.imag,
                              V=V,
                              Vinv=Vinv,
+                             expand_factor=args.expand_factor,
                              C_init=args.C_init,
                              discretization=args.discretization,
                              dt_min=args.dt_min,

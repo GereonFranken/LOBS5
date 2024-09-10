@@ -1,5 +1,8 @@
+from concurrent import futures
 import os
 import pathlib
+from typing import List, Optional, Sequence
+import flax
 from jax import random
 import orbax.checkpoint as ocp
 from flax.training import checkpoints
@@ -8,61 +11,62 @@ import wandb
 from lob.init_train import init_train_state, load_checkpoint
 from lob.dataloading import Datasets, create_lobster_prediction_dataset, create_lobster_train_loader
 from lob.lobster_dataloader import LOBSTER_Dataset
+from flax.training import train_state
 from lob.train_helpers import create_train_state, reduce_lr_on_plateau,\
     linear_warmup, cosine_annealing, constant_lr, train_epoch, validate
 from constants import TrainArgs
 
-# class TrainStateHandler(ocp.pytree_checkpoint_handler.TypeHandler):
-#         """Serializes MyState to the numpy npz format."""
+class TrainStateHandler(ocp.pytree_checkpoint_handler.TypeHandler):
+        """Serializes MyState to the numpy npz format."""
 
 
-#         def __init__(self):
-#             self._executor = futures.ThreadPoolExecutor(max_workers=1)
-#             # self.ParamInfo = ocp.pytree_checkpoint_handler.ParamInfo
-#             # self.MetaData = ocp.metadata.Metadata
+        def __init__(self):
+            self._executor = futures.ThreadPoolExecutor(max_workers=1)
+            # self.ParamInfo = ocp.pytree_checkpoint_handler.ParamInfo
+            # self.MetaData = ocp.metadata.Metadata
 
-#         def typestr(self) -> str:
-#             return 'TrainState'
+        def typestr(self) -> str:
+            return 'TrainState'
 
-#         async def serialize(
-#             self,
-#             value: train_state.TrainState,
-#             # infos: Sequence[ParamInfo],
-#             args: Optional[Sequence[ocp.SaveArgs]],
-#         ) -> List[futures.Future]:
-#             # state_dict = flax.serialization.to_state_dict(value)
-#             serialized_dict = {}
-#             for key, val in value.items():
-#                 if isinstance(val, flax.core.frozen_dict.FrozenDict):
-#                     serialized_dict[key] = flax.serialization.to_state_dict(val)
-#                 else:
-#                     serialized_dict[key] = val
-#             return serialized_dict
-#             # return state_dict
+        async def serialize(
+            self,
+            value: train_state.TrainState,
+            # infos: Sequence[ParamInfo],
+            args: Optional[Sequence[ocp.SaveArgs]],
+        ) -> List[futures.Future]:
+            # state_dict = flax.serialization.to_state_dict(value)
+            serialized_dict = {}
+            for key, val in value.items():
+                if isinstance(val, flax.core.frozen_dict.FrozenDict):
+                    serialized_dict[key] = flax.serialization.to_state_dict(val)
+                else:
+                    serialized_dict[key] = val
+            return serialized_dict
+            # return state_dict
 
-#         async def deserialize(
-#             self,
-#             value: dict,
-#             # infos: Sequence[ParamInfo],
-#             args: Optional[Sequence[ocp.RestoreArgs]] = None,
-#         ) -> train_state.TrainState:
-#             # state_dict = value
-#             deserialized_dict = {}
-#             for key, val in value.items():
-#                 if isinstance(val, dict) and 'collection' in val:
-#                     deserialized_dict[key] = flax.serialization.from_state_dict(flax.core.unfreeze(val), val)
-#                 else:
-#                     deserialized_dict[key] = val
-#             return deserialized_dict
-#             # return flax.serialization.from_state_dict(flax.core.unfreeze(value), state_dict)
+        async def deserialize(
+            self,
+            value: dict,
+            # infos: Sequence[ParamInfo],
+            args: Optional[Sequence[ocp.RestoreArgs]] = None,
+        ) -> train_state.TrainState:
+            # state_dict = value
+            deserialized_dict = {}
+            for key, val in value.items():
+                if isinstance(val, dict) and 'collection' in val:
+                    deserialized_dict[key] = flax.serialization.from_state_dict(flax.core.unfreeze(val), val)
+                else:
+                    deserialized_dict[key] = val
+            return deserialized_dict
+            # return flax.serialization.from_state_dict(flax.core.unfreeze(value), state_dict)
 
-#         async def metadata(self):#, infos: Sequence[ParamInfo]) -> Sequence[Metadata]:
-#             # This method is explained in a separate section.
-#             return []
-#             # return [Metadata(name=info.name, directory=info.path) for info in infos]
-# ocp.type_handlers.register_type_handler(
-#     train_state.TrainState, TrainStateHandler(), override=True
-# )
+        async def metadata(self):#, infos: Sequence[ParamInfo]) -> Sequence[Metadata]:
+            # This method is explained in a separate section.
+            return []
+            # return [Metadata(name=info.name, directory=info.path) for info in infos]
+ocp.type_handlers.register_type_handler(
+    train_state.TrainState, TrainStateHandler(), override=True
+)
 
 
 def train(args: TrainArgs):

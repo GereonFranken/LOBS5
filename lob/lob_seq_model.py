@@ -130,14 +130,15 @@ class LobBookModel(nn.Module):
         Initializes ...
         """
         Lambda, V, Vinv = init_Lambda_V_Vinv(self.args, d_model=self.d_book)
-        self.layers = tuple(
-            SequenceLayer(
-                # fix ssm init to correct shape (different than other layers)
-                ssm=partial(self.ssm, L=self.book_seq_len, H=self.d_book, 
+        ssm = partial(self.ssm, L=self.book_seq_len, H=self.d_book, 
                             Lambda_re_init=Lambda.real,
                             Lambda_im_init=Lambda.imag,
                             V=V,
-                            Vinv=Vinv,),
+                            Vinv=Vinv)
+        self.layers = tuple(
+            SequenceLayer(
+                # fix ssm init to correct shape (different than other layers)
+                ssm=ssm,
                 dropout=self.dropout,
                 d_model=self.d_book,  # take book series as is
                 activation=self.activation,
@@ -149,6 +150,7 @@ class LobBookModel(nn.Module):
             ) for _ in range(self.n_pre_layers)
         )
         self.layers += (nn.Dense(self.d_model), )  # project to d_model
+        Lambda, V, Vinv = init_Lambda_V_Vinv(self.args, d_model=self.d_model)
         self.layers += tuple(
             SequenceLayer(
                 ssm=partial(self.ssm, L=self.book_seq_len, H=self.d_model,

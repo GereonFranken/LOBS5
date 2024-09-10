@@ -5,7 +5,8 @@
 import argparse
 from constants import TrainArgs
 from s5.utils.util import str2bool
-from lob.train import train
+# from lob.train import train
+from mamba.train import train
 from lob.dataloading import Datasets
 #import tensorflow as tf
 import os
@@ -30,7 +31,7 @@ if __name__ == "__main__":
 
 	parser = argparse.ArgumentParser()
 
-	parser.add_argument("--USE_WANDB", type=str2bool, default=True,
+	parser.add_argument("--USE_WANDB", type=str2bool, default=False,
 						help="log with wandb?")
 	parser.add_argument("--wandb_project", type=str, default="LOBS5",
 						help="wandb project name")
@@ -39,7 +40,8 @@ if __name__ == "__main__":
 	parser.add_argument("--dir_name", type=str, default='./data',
 						help="name of directory where data is cached")
 	parser.add_argument("--dataset", type=str, choices=Datasets.keys(),
-						default='lobster-prediction',
+						default='lra-cifar-classification',
+						# default='lobster-prediction',
 						help="dataset name")
 	parser.add_argument("--masking", type=str, choices={'causal', 'random'},
 						default='causal',  # random

@@ -51,6 +51,7 @@ def create_lobster_prediction_dataset(
 	)
 	dataset_obj.setup()
 
+
 	print("Using mask function:", mask_fn)
 
 	# use sampler to only get individual samples and automatic batching from dataloader
