@@ -259,7 +259,7 @@ class S5SSM(nn.Module):
         # self.Lambda_proj = nn.Dense(local_P)
         # Initialize feedthrough (D) matrix
         self.D = self.param("D", normal(stddev=1.0), (self.L, self.expanded_H,))
-        self.D_proj = nn.Dense(1)
+        self.D_proj = nn.Dense(self.expanded_H)
 
         self.output_proj = nn.Dense(self.H)
 
@@ -280,17 +280,21 @@ class S5SSM(nn.Module):
         B_act = nn.silu(B_conv)  # Apply activation function
 
         B_bar = jnp.einsum("lhp, lh -> lhp", self.B_bar, B_act)
-        Lambda_bar = nn.softplus(self.Lambda_bar + Lambda_act.reshape(self.L, self.expanded_H, 1))
-        
+        # TODO: Double check activation function: Paper says softplus but it produces instable values
+        # Lambda_bar = nn.softplus(self.Lambda_bar + Lambda_act.reshape(self.L, self.expanded_H, 1))
+        Lambda_bar = nn.sigmoid(self.Lambda_bar + Lambda_act.reshape(self.L, self.expanded_H, 1))
+
         _, xs = jax.lax.associative_scan(binary_operator, (Lambda_bar, B_bar))
-        ys =  jax.vmap(lambda x, c: (x @ c).real)(xs, self.C_tilde)
+        ys =  jax.vmap(lambda x, c: x @ c)(xs, self.C_tilde)
 
         # Add feedthrough matrix output Du;
-        D = self.D_proj(input_sequence)
-        Du = nn.softplus(D) * B_act
+        # TODO: Double check feedthrough mechanism
+        Du = self.D * self.D_proj(input_sequence)
+        # Du = Du.reshape(self.L, self.expanded_H, 1) * np.ones((self.L, self.expanded_H, self.P))  
+        # Du = nn.softplus(D) * B_act
         # Du = D * input_sequence
 
-        y = (ys + Du) * Lambda_act
+        y = (ys + Du) #* Lambda_act
 
         # ht_pre_gate = ys + D
 

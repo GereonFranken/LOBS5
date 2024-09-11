@@ -89,10 +89,10 @@ def apply_ssm(Lambda_bar, B_bar, C_tilde, input_sequence, conj_sym, bidirectiona
 
 
 class S5SSM(nn.Module):
-    Lambda_re_init: np.DeviceArray
-    Lambda_im_init: np.DeviceArray
-    V: np.DeviceArray
-    Vinv: np.DeviceArray
+    Lambda_re_init: np.ndarray
+    Lambda_im_init: np.ndarray
+    V: np.ndarray
+    Vinv: np.ndarray
 
     H: int
     P: int
