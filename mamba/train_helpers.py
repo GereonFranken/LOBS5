@@ -341,6 +341,7 @@ def train_epoch(state, rng, model, trainloader, seq_len, in_dim, batchnorm, lr_p
 
     decay_function, ssm_lr, lr, step, end_step, opt_config, lr_min = lr_params
 
+
     for batch_idx, batch in enumerate(tqdm(trainloader)):
         inputs, labels, integration_times = prep_batch(batch, seq_len, in_dim)
         rng, drop_rng = jax.random.split(rng)

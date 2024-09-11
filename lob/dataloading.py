@@ -2,7 +2,7 @@ import torch
 from pathlib import Path
 import os
 from typing import Callable, Optional, TypeVar, Dict, Tuple, List, Union
-from s5.dataloading import make_data_loader
+from dataloading.datasets import make_data_loader
 from .lobster_dataloader import LOBSTER, LOBSTER_Dataset, LOBSTER_Sampler
 
 

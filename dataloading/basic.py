@@ -5,7 +5,7 @@ import torchvision
 from einops.layers.torch import Rearrange
 
 from .base import default_data_path, ImageResolutionSequenceDataset, ResolutionSequenceDataset, SequenceDataset
-from ..utils import permutations
+from dataloading import permutations
 
 
 class MNIST(SequenceDataset):
@@ -238,7 +238,7 @@ class SpeechCommands(ResolutionSequenceDataset):
     def setup(self):
         self.data_dir = self.data_dir or default_data_path # TODO make same logic as other classes
 
-        from s5.dataloaders.sc import _SpeechCommands
+        from dataloading.sc import _SpeechCommands
 
         # TODO refactor with data_dir argument
         self.dataset_train = _SpeechCommands(

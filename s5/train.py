@@ -6,7 +6,7 @@ import wandb
 
 from .train_helpers import create_train_state, reduce_lr_on_plateau,\
     linear_warmup, cosine_annealing, constant_lr, train_epoch, validate
-from .dataloading import Datasets
+from dataloading.datasets import Datasets
 from .seq_model import BatchClassificationModel, RetrievalModel
 from .ssm import init_S5SSM
 from .ssm_init import make_DPLR_HiPPO

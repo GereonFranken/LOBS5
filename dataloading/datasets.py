@@ -2,10 +2,6 @@ import torch
 from pathlib import Path
 import os
 from typing import Callable, Optional, TypeVar, Dict, Tuple, List, Union
-import torch.utils
-from torch.utils.data import Sampler
-import torch.utils.data
-import torch.utils.data.dataset
 
 DEFAULT_CACHE_DIR_ROOT = Path('./cache_dir/')
 
@@ -30,9 +26,7 @@ def make_data_loader(dset,
 					 batch_size: int=128,
 					 shuffle: bool=True,
 					 drop_last: bool=True,
-					 collate_fn: callable=None,
-					 sampler: Optional[Sampler]=None,
-					 num_workers: int = 0):
+					 collate_fn: callable=None):
 	"""
 
 	:param dset: 			(PT dset):		PyTorch dataset object.
@@ -55,15 +49,9 @@ def make_data_loader(dset,
 		assert collate_fn is None
 		collate_fn = dobj._collate_fn
 
-	if sampler is not None:
-		shuffle = False
-		drop_last = False
-
 	# Generate the dataloaders.
-	return torch.utils.data.DataLoader(
-		dataset=dset, collate_fn=collate_fn, batch_size=batch_size, shuffle=shuffle,
-		drop_last=drop_last, generator=rng, sampler=sampler, num_workers=num_workers)#,
-		# prefetch_factor=3)
+	return torch.utils.data.DataLoader(dataset=dset, collate_fn=collate_fn, batch_size=batch_size, shuffle=shuffle,
+									   drop_last=drop_last, generator=rng)
 
 
 def create_lra_imdb_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_CACHE_DIR_ROOT,
@@ -77,7 +65,7 @@ def create_lra_imdb_classification_dataset(cache_dir: Union[str, Path] = DEFAULT
 	:return:
 	"""
 	print("[*] Generating LRA-text (IMDB) Classification Dataset")
-	from mamba.dataloaders.lra import IMDB
+	from dataloading.lra import IMDB
 	name = 'imdb'
 
 	dataset_obj = IMDB('imdb', )
@@ -105,7 +93,7 @@ def create_lra_listops_classification_dataset(cache_dir: Union[str, Path] = DEFA
 	See abstract template.
 	"""
 	print("[*] Generating LRA-listops Classification Dataset")
-	from mamba.dataloaders.lra import ListOps
+	from dataloading.lra import ListOps
 	name = 'listops'
 	dir_name = './raw_datasets/lra_release/lra_release/listops-1000'
 
@@ -134,7 +122,7 @@ def create_lra_path32_classification_dataset(cache_dir: Union[str, Path] = DEFAU
 	See abstract template.
 	"""
 	print("[*] Generating LRA-Pathfinder32 Classification Dataset")
-	from mamba.dataloaders.lra import PathFinder
+	from dataloading.lra import PathFinder
 	name = 'pathfinder'
 	resolution = 32
 	dir_name = f'./raw_datasets/lra_release/lra_release/pathfinder{resolution}'
@@ -164,7 +152,7 @@ def create_lra_pathx_classification_dataset(cache_dir: Union[str, Path] = DEFAUL
 	See abstract template.
 	"""
 	print("[*] Generating LRA-PathX Classification Dataset")
-	from mamba.dataloaders.lra import PathFinder
+	from dataloading.lra import PathFinder
 	name = 'pathfinder'
 	resolution = 128
 	dir_name = f'./raw_datasets/lra_release/lra_release/pathfinder{resolution}'
@@ -197,7 +185,7 @@ def create_lra_image_classification_dataset(cache_dir: Union[str, Path] = DEFAUL
 	"""
 
 	print("[*] Generating LRA-listops Classification Dataset")
-	from mamba.dataloaders.basic import CIFAR10
+	from dataloading.basic import CIFAR10
 	name = 'cifar'
 
 	kwargs = {
@@ -208,9 +196,9 @@ def create_lra_image_classification_dataset(cache_dir: Union[str, Path] = DEFAUL
 	dataset_obj.setup()
 
 
-	train = torch.utils.data.dataset.Subset(dataset_obj.dataset_train, list(range(1_00)))
-	val= torch.utils.data.dataset.Subset(dataset_obj.dataset_val, list(range(1_0)))
-	test = torch.utils.data.dataset.Subset(dataset_obj.dataset_test, list(range(1_0)))
+	train = torch.utils.data.dataset.Subset(dataset_obj.dataset_train, list(range(5_000)))
+	val= torch.utils.data.dataset.Subset(dataset_obj.dataset_val, list(range(5_00)))
+	test = torch.utils.data.dataset.Subset(dataset_obj.dataset_test, list(range(5_00)))
 
 	# train = dataset_obj.dataset_train
 	# val= dataset_obj.dataset_val
@@ -237,7 +225,7 @@ def create_lra_aan_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_
 	See abstract template.
 	"""
 	print("[*] Generating LRA-AAN Classification Dataset")
-	from mamba.dataloaders.lra import AAN
+	from dataloading.lra import AAN
 	name = 'aan'
 
 	dir_name = './raw_datasets/lra_release/lra_release/tsv_data'
@@ -274,7 +262,7 @@ def create_speechcommands35_classification_dataset(cache_dir: Union[str, Path] =
 	See abstract template.
 	"""
 	print("[*] Generating SpeechCommands35 Classification Dataset")
-	from mamba.dataloaders.basic import SpeechCommands
+	from dataloading.basic import SpeechCommands
 	name = 'sc'
 
 	dir_name = f'./raw_datasets/speech_commands/0.0.2/'
@@ -320,7 +308,7 @@ def create_cifar_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_CA
 	"""
 
 	print("[*] Generating CIFAR (color) Classification Dataset")
-	from mamba.dataloaders.basic import CIFAR10
+	from dataloading.basic import CIFAR10
 	name = 'cifar'
 
 	kwargs = {
@@ -354,7 +342,7 @@ def create_mnist_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_CA
 	"""
 
 	print("[*] Generating MNIST Classification Dataset")
-	from mamba.dataloaders.basic import MNIST
+	from dataloading.basic import MNIST
 	name = 'mnist'
 
 	kwargs = {
@@ -386,7 +374,7 @@ def create_pmnist_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_C
 	"""
 
 	print("[*] Generating permuted-MNIST Classification Dataset")
-	from mamba.dataloaders.basic import MNIST
+	from dataloading.basic import MNIST
 	name = 'mnist'
 
 	kwargs = {
@@ -408,13 +396,6 @@ def create_pmnist_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_C
 	return trn_loader, val_loader, tst_loader, aux_loaders, N_CLASSES, SEQ_LENGTH, IN_DIM, TRAIN_SIZE
 
 
-def create_lobster_prediction_dataset(cache_dir: Union[str, Path] = DEFAULT_CACHE_DIR_ROOT,
-									  seed: int = 42,
-									  bsz: int=128) -> ReturnType:
-	""" TODO
-	"""
-	pass
-
 Datasets = {
 	# Other loaders.
 	"mnist-classification": create_mnist_classification_dataset,
@@ -431,7 +412,4 @@ Datasets = {
 
 	# Speech.
 	"speech35-classification": create_speechcommands35_classification_dataset,
-
-	# financial data
-	"lobster-prediction": create_lobster_prediction_dataset,
 }

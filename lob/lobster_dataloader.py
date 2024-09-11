@@ -23,8 +23,7 @@ from jax.nn import one_hot
 import lob.encoding as encoding
 from lob.encoding import Vocab, Message_Tokenizer
 from lob.preproc import transform_L2_state
-from s5.dataloaders.base import default_data_path, SequenceDataset
-from s5.utils import permutations
+from dataloading.base import default_data_path, SequenceDataset
 default_data_path = Path(__file__).parent.parent.absolute()
 default_data_path = default_data_path / "data"
 
